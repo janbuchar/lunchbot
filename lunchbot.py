@@ -1,3 +1,4 @@
+import asyncio
 from io import StringIO
 import os
 
@@ -11,10 +12,12 @@ LUNCH_COMMANDS = ("obed", "oběd")
 URLS = [*map(lambda p: f"https://www.menicka.cz/{p}.html", os.environ.get("PATHS", "").split(","))]
 
 
-def fetch_menus(slack_client, channel):
-    result = ""
+async def fetch_menus(rtm_client, web_client, channel):
+    await rtm_client.typing(channel=channel)
 
     for url in URLS:
+        result = ""
+
         response = requests.get(url)
         parser = lxml.etree.HTMLParser()
         tree = lxml.etree.parse(StringIO(response.text), parser)
@@ -28,21 +31,29 @@ def fetch_menus(slack_client, channel):
             result += child.xpath("string()")
             result += "\n"
 
-        result += "\n"
+        await web_client.chat_postMessage(
+            channel=channel,
+            text=result
+        )
 
-    slack_client.chat_postMessage(
-        channel=channel,
-        text=result
-    )
 
 
 @slack.RTMClient.run_on(event="message")
-def handle_message(**payload):
-    if any(command in payload["data"]["text"] for command in LUNCH_COMMANDS):
-        fetch_menus(payload['web_client'], payload["data"]["channel"])
+async def handle_message(**payload):
+    web_client = payload['web_client']
+    rtm_client = payload['rtm_client']
+    text = payload["data"]["text"]
+    channel = payload["data"]["channel"]
+
+    if any(command in text.lower() for command in LUNCH_COMMANDS):
+        await fetch_menus(rtm_client, web_client, channel)
+
+
+async def main():
+    slack_client = slack.RTMClient(token=os.environ["SLACK_TOKEN"], run_async=True)
+    await slack_client.start()
 
 
 if __name__ == "__main__":
-    slack_client = slack.RTMClient(token=os.environ["SLACK_TOKEN"])
-    slack_client.start()
+    asyncio.run(main())
 
